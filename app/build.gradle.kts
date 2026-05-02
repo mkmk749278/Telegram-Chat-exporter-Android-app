@@ -15,8 +15,8 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        val apiId = (project.findProperty("API_ID") as? String) ?: "0"
-        val apiHash = (project.findProperty("API_HASH") as? String) ?: ""
+        val apiId = (project.findProperty("API_ID") as? String)?.takeIf { it.isNotBlank() } ?: "0"
+        val apiHash = (project.findProperty("API_HASH") as? String)?.takeIf { it.isNotBlank() } ?: ""
         buildConfigField("int", "API_ID", apiId)
         buildConfigField("String", "API_HASH", "\"$apiHash\"")
 
@@ -80,10 +80,6 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
-}
-
-repositories {
-    flatDir { dirs("libs") }
 }
 
 dependencies {

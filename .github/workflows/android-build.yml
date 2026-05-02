@@ -40,16 +40,22 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Fetch TDLib AAR from release
+        id: tdlib
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p app/libs
           if [ "$TDLIB_RELEASE_TAG" = "tdlib-master-PLACEHOLDER" ]; then
-            echo "::warning::TDLIB_RELEASE_TAG is not pinned. Run the 'Build TDLib AAR' workflow once and update env.TDLIB_RELEASE_TAG."
-            # Create a stub so Gradle's flatDir reference doesn't fail; the build will fail at link/runtime.
-            echo "stub" > app/libs/tdlib.aar
+            {
+              echo "## TDLib not pinned — build skipped"
+              echo ""
+              echo "Run the **Build TDLib AAR** workflow once, then replace"
+              echo "\`TDLIB_RELEASE_TAG\` in \`.github/workflows/android-build.yml\`"
+              echo "with the resulting tag and push."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          mkdir -p app/libs
           gh release download "$TDLIB_RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --pattern tdlib.aar \
@@ -58,12 +64,14 @@ jobs:
           ls -lh app/libs/
 
       - name: Build debug APK
+        if: steps.tdlib.outputs.skip != 'true'
         run: |
           ./gradlew :app:assembleDebug --no-daemon \
             -PAPI_ID="${{ secrets.API_ID }}" \
             -PAPI_HASH="${{ secrets.API_HASH }}"
 
       - name: Upload debug APK artifact
+        if: steps.tdlib.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apks
