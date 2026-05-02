@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     permissions:
       contents: write
     env:
@@ -21,7 +21,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            make git zlib1g-dev libssl-dev gperf cmake clang libc++-dev libc++abi-dev ccache
+            make git perl pkg-config zlib1g-dev gperf cmake clang \
+            libc++-dev libc++abi-dev ccache unzip
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Android NDK r25c
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r25c
 
       - name: Checkout TDLib source
         uses: actions/checkout@v4
@@ -36,12 +52,6 @@ jobs:
         working-directory: td
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Android NDK r25c
-        uses: nttld/setup-ndk@v1
-        id: ndk
-        with:
-          ndk-version: r25c
-
       - name: ccache
         uses: actions/cache@v4
         with:
@@ -51,24 +61,42 @@ jobs:
             tdlib-ccache-${{ runner.os }}-${{ env.TDLIB_REF }}-
             tdlib-ccache-${{ runner.os }}-
 
-      - name: Build TDLib for Android
+      - name: Show TDLib Android scripts
+        working-directory: td/example/android
+        run: ls -la
+
+      - name: Build OpenSSL for Android
         working-directory: td/example/android
         env:
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           PATH: /usr/lib/ccache:${{ env.PATH }}
-        run: |
-          # The official build script downloads OpenSSL prebuilt + builds TDLib for arm64-v8a, armeabi-v7a, x86, x86_64.
-          # Final artifact lives at td/example/android/tdlib/libs/td/td-release.aar
-          ./check_environment.sh
-          ./fetch-sdk.sh || true   # downloads cmdline tools when missing; tolerated if env already provides SDK
-          ./build-openssl.sh
-          ./build-tdlib.sh
+        run: ./build-openssl.sh
 
-      - name: Stage AAR
+      - name: Build TDLib JNI + AAR
+        working-directory: td/example/android
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          PATH: /usr/lib/ccache:${{ env.PATH }}
+        run: ./build-tdlib.sh
+
+      - name: Locate AAR
+        id: aar
         run: |
+          set -eux
+          # The build script puts the AAR somewhere under td/example/android/tdlib/.
+          # Search to be resilient to TDLib reorganising the layout.
+          path=$(find td/example/android -name 'td-release.aar' -o -name 'td-debug.aar' | head -1)
+          if [ -z "$path" ]; then
+            echo "::error::No AAR found under td/example/android/"
+            find td/example/android -name '*.aar' || true
+            exit 1
+          fi
           mkdir -p out
-          cp td/example/android/tdlib/libs/td/td-release.aar out/tdlib.aar
+          cp "$path" out/tdlib.aar
           ls -lh out/
+          echo "src=$path" >> "$GITHUB_OUTPUT"
 
       - name: Publish release with tdlib.aar
         uses: softprops/action-gh-release@v2
@@ -86,7 +114,10 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## TDLib AAR built" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Tag: \`tdlib-${{ env.TDLIB_REF }}-${{ steps.sha.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Update \`TDLIB_RELEASE_TAG\` in \`.github/workflows/android-build.yml\` to consume it." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## TDLib AAR built"
+            echo ""
+            echo "- Source AAR: \`${{ steps.aar.outputs.src }}\`"
+            echo "- Tag: \`tdlib-${{ env.TDLIB_REF }}-${{ steps.sha.outputs.short }}\`"
+            echo "- Update \`TDLIB_RELEASE_TAG\` in \`.github/workflows/android-build.yml\` to consume it."
+          } >> "$GITHUB_STEP_SUMMARY"
