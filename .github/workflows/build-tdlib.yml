@@ -18,8 +18,20 @@ jobs:
       TDLIB_REF: ${{ github.event.inputs.tdlib_ref }}
     steps:
       - name: Install build prerequisites
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
+          set -eux
+          # GitHub-hosted runners default to Microsoft's Azure Ubuntu mirror,
+          # which periodically hangs. Force the canonical mirror first.
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list || true
+          for f in /etc/apt/sources.list.d/*.list; do
+            [ -e "$f" ] && sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' "$f" || true
+          done
+          # Bound apt's network behaviour so it can never sit in a multi-hour retry loop.
+          sudo apt-get update \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30
           sudo apt-get install -y --no-install-recommends \
             make git perl pkg-config zlib1g-dev gperf cmake clang \
             libc++-dev libc++abi-dev ccache unzip
