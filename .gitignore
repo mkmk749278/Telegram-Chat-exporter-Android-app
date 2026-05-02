@@ -1,0 +1,22 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jks
+*.keystore
+
+# TDLib AAR is fetched at build time, never committed
+app/libs/tdlib.aar
+
+# OS
+.DS_Store
+Thumbs.db
