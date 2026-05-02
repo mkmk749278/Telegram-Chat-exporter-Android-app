@@ -1,0 +1,92 @@
+name: Build TDLib AAR
+
+on:
+  workflow_dispatch:
+    inputs:
+      tdlib_ref:
+        description: "TDLib git ref (branch, tag, or sha)"
+        required: true
+        default: "master"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      TDLIB_REF: ${{ github.event.inputs.tdlib_ref }}
+    steps:
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make git zlib1g-dev libssl-dev gperf cmake clang libc++-dev libc++abi-dev ccache
+
+      - name: Checkout TDLib source
+        uses: actions/checkout@v4
+        with:
+          repository: tdlib/td
+          ref: ${{ env.TDLIB_REF }}
+          path: td
+          fetch-depth: 1
+
+      - name: Resolve TDLib short SHA
+        id: sha
+        working-directory: td
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Android NDK r25c
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r25c
+
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: tdlib-ccache-${{ runner.os }}-${{ env.TDLIB_REF }}-${{ steps.sha.outputs.short }}
+          restore-keys: |
+            tdlib-ccache-${{ runner.os }}-${{ env.TDLIB_REF }}-
+            tdlib-ccache-${{ runner.os }}-
+
+      - name: Build TDLib for Android
+        working-directory: td/example/android
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+          PATH: /usr/lib/ccache:${{ env.PATH }}
+        run: |
+          # The official build script downloads OpenSSL prebuilt + builds TDLib for arm64-v8a, armeabi-v7a, x86, x86_64.
+          # Final artifact lives at td/example/android/tdlib/libs/td/td-release.aar
+          ./check_environment.sh
+          ./fetch-sdk.sh || true   # downloads cmdline tools when missing; tolerated if env already provides SDK
+          ./build-openssl.sh
+          ./build-tdlib.sh
+
+      - name: Stage AAR
+        run: |
+          mkdir -p out
+          cp td/example/android/tdlib/libs/td/td-release.aar out/tdlib.aar
+          ls -lh out/
+
+      - name: Publish release with tdlib.aar
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tdlib-${{ env.TDLIB_REF }}-${{ steps.sha.outputs.short }}
+          name: TDLib (${{ env.TDLIB_REF }} @ ${{ steps.sha.outputs.short }})
+          body: |
+            Auto-built TDLib Android AAR.
+            Source: https://github.com/tdlib/td/commit/${{ steps.sha.outputs.short }}
+            Pin this tag in `.github/workflows/android-build.yml` (`TDLIB_RELEASE_TAG`).
+          files: out/tdlib.aar
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## TDLib AAR built" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: \`tdlib-${{ env.TDLIB_REF }}-${{ steps.sha.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Update \`TDLIB_RELEASE_TAG\` in \`.github/workflows/android-build.yml\` to consume it." >> "$GITHUB_STEP_SUMMARY"
